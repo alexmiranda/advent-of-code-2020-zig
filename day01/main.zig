@@ -1,4 +1,6 @@
 const std = @import("std");
+const example = @embedFile("example.txt");
+const Reader = std.Io.Reader;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -13,12 +15,43 @@ pub fn main(init: std.process.Init) !void {
     };
     defer input_file.close(io);
 
-    try stdout.print("All your {s} are belong to us.\n", .{"codebase"});
+    var buf: [4096]u8 = undefined;
+    var reader = input_file.reader(io, &buf);
+    const answer_p1 = find(&reader.interface);
+    try stdout.print("Part 1: {d}\n", .{answer_p1});
     try stdout.flush();
 }
 
+fn find(reader: *Reader) u32 {
+    var nums: std.bit_set.StaticBitSet(2020) = .initEmpty();
+
+    var val: u32 = 0;
+    while (reader.takeByte()) |ch| {
+        switch (ch) {
+            '\n' => {
+                std.debug.assert(val <= 2020);
+                const d: u32 = 2020 - val;
+                if (nums.isSet(d)) {
+                    return val * d;
+                }
+                nums.set(val);
+                val = 0;
+            },
+            else => {
+                val = (val * 10) + (ch - '0');
+            },
+        }
+    } else |err| switch (err) {
+        error.EndOfStream => {},
+        else => std.debug.panic("{any}", .{err}),
+    }
+    unreachable;
+}
+
 test "part 1" {
-    return error.SkipZigTest;
+    var reader: Reader = .fixed(example);
+    const answer = find(&reader);
+    try std.testing.expectEqual(514579, answer);
 }
 
 test "part 2" {
