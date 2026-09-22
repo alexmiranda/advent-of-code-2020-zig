@@ -19,6 +19,10 @@ pub fn main(init: std.process.Init) !void {
     var reader = input_file.reader(io, &buf);
     const answer_p1 = countValidPasswords(&reader.interface);
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+
+    try reader.seekTo(0);
+    const answer_p2 = countValidPasswordsRevised(&reader.interface);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
@@ -49,6 +53,31 @@ fn countValidPasswords(reader: *Reader) usize {
     return count;
 }
 
+fn countValidPasswordsRevised(reader: *Reader) usize {
+    var count: usize = 0;
+    var tok: []u8 = undefined;
+    while (reader.peekByte() catch null) |ch| {
+        if (ch == '\n') break;
+        tok = reader.takeDelimiterExclusive('-') catch unreachable;
+        _ = reader.discard(.limited(1)) catch unreachable;
+        const lhs = std.fmt.parseInt(u8, tok, 10) catch unreachable;
+
+        tok = reader.takeDelimiterExclusive(' ') catch unreachable;
+        _ = reader.discard(.limited(1)) catch unreachable;
+        const rhs = std.fmt.parseInt(u8, tok, 10) catch unreachable;
+
+        const letter = reader.takeByte() catch unreachable;
+        _ = reader.discard(.limited(2)) catch unreachable;
+
+        tok = reader.takeDelimiterExclusive('\n') catch unreachable;
+        _ = reader.discard(.limited(1)) catch unreachable;
+
+        // std.debug.print("{d}-{d} {c}: {s}\n", .{ lhs, rhs, letter, tok });
+        if (((tok.len >= lhs and tok[lhs - 1] == letter) or (tok.len >= rhs and tok[rhs - 1] == letter)) and tok[lhs - 1] != tok[rhs - 1]) count += 1;
+    }
+    return count;
+}
+
 test "part 1" {
     var reader: Reader = .fixed(example);
     const answer = countValidPasswords(&reader);
@@ -56,5 +85,7 @@ test "part 1" {
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    var reader: Reader = .fixed(example);
+    const answer = countValidPasswordsRevised(&reader);
+    try std.testing.expectEqual(1, answer);
 }
