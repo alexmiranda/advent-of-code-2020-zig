@@ -19,6 +19,10 @@ pub fn main(init: std.process.Init) !void {
     var reader = input_file.reader(io, &buf);
     const answer_p1 = try countAnsweredQuestions(&reader.interface);
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+
+    try reader.seekTo(0);
+    const answer_p2 = try countAnsweredQuestionsGroup(&reader.interface);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
@@ -44,6 +48,33 @@ fn countAnsweredQuestions(reader: *Reader) !usize {
     } else sum;
 }
 
+fn countAnsweredQuestionsGroup(reader: *Reader) !usize {
+    var group: std.bit_set.StaticBitSet(26) = .full;
+    var bitset: std.bit_set.StaticBitSet(26) = .empty;
+    var sum: usize, var last: u8 = .{ 0, 0 };
+    return while (reader.takeByte() catch |err| switch (err) {
+        error.EndOfStream => null,
+        else => return err,
+    }) |c| {
+        // std.debug.print("{c}", .{c});
+        sw: switch (c) {
+            '\n' => {
+                if (last == '\n') {
+                    sum += group.count();
+                    group = .full;
+                    // std.debug.print("sum = {d}\n", .{sum});
+                    break :sw;
+                }
+                group.setIntersection(bitset);
+                bitset = .empty;
+            },
+            'a'...'z' => bitset.set(c - 'a'),
+            else => unreachable,
+        }
+        last = c;
+    } else sum;
+}
+
 test "part 1" {
     var reader: Reader = .fixed(example);
     const answer = try countAnsweredQuestions(&reader);
@@ -51,5 +82,7 @@ test "part 1" {
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    var reader: Reader = .fixed(example);
+    const answer = try countAnsweredQuestionsGroup(&reader);
+    try std.testing.expectEqual(6, answer);
 }
