@@ -1,4 +1,6 @@
 const std = @import("std");
+const example = @embedFile("example.txt");
+const Reader = std.Io.Reader;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -13,12 +15,30 @@ pub fn main(init: std.process.Init) !void {
     };
     defer input_file.close(io);
 
-    try stdout.print("All your {s} are belong to us.\n", .{"codebase"});
+    var buf: [4096]u8 = undefined;
+    var reader = input_file.reader(io, &buf);
+    const answer_p1 = try followSlope(&reader.interface);
+    try stdout.print("Part 1: {d}\n", .{answer_p1});
     try stdout.flush();
 }
 
+fn followSlope(reader: *Reader) !usize {
+    const width = (reader.discardDelimiterInclusive('\n') catch 0) - 1;
+    var pos: usize = 0;
+    var count: usize = 0;
+    while (reader.takeDelimiterExclusive('\n') catch null) |row| : (_ = try reader.discard(.limited(1))) {
+        if (row.len == 0) break;
+        pos = (pos + 3) % width;
+        // std.debug.print("{s} (pos={d})\n", .{ row, pos });
+        if ('#' == row[pos]) count += 1;
+    }
+    return count;
+}
+
 test "part 1" {
-    return error.SkipZigTest;
+    var reader: Reader = .fixed(example);
+    const answer = try followSlope(&reader);
+    try std.testing.expectEqual(7, answer);
 }
 
 test "part 2" {
