@@ -18,6 +18,10 @@ pub fn main(init: std.process.Init) !void {
     var reader = input_file.reader(io, &buf);
     const answer_p1 = try highestSeatID(&reader.interface);
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+
+    try reader.seekTo(0);
+    const answer_p2 = try findMissingSeat(&reader.interface);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
@@ -36,6 +40,27 @@ fn highestSeatID(reader: *Reader) !u32 {
         max = @max(max, try seatID(locator));
     }
     return max;
+}
+
+fn findMissingSeat(reader: *Reader) !u32 {
+    const min: u32, const max: u32, var mask: u32 = blk: {
+        var min: u32, var max: u32, var mask: u32 = .{ 0, 0, 0 };
+        while (reader.take(10) catch |err| switch (err) {
+            error.EndOfStream => null,
+            else => return err,
+        }) |locator| : (_ = try reader.discard(.limited(1))) {
+            const seat_id = try seatID(locator);
+            min = @min(min, seat_id);
+            max = @max(max, seat_id);
+            mask ^= seat_id;
+        }
+        break :blk .{ min, max, mask };
+    };
+    var slide: u32 = min;
+    while (slide <= max) : (slide += 1) {
+        mask ^= slide;
+    }
+    return mask;
 }
 
 fn seatID(locator: []const u8) SpacePartitioningError!u32 {
