@@ -19,6 +19,10 @@ pub fn main(init: std.process.Init) !void {
     var reader = input_file.reader(io, &buf);
     const answer_p1 = try followSlope(&reader.interface);
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+
+    try reader.seekTo(0);
+    const answer_p2 = try followSlopePattern(&reader.interface);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
@@ -35,6 +39,23 @@ fn followSlope(reader: *Reader) !usize {
     return count;
 }
 
+fn followSlopePattern(reader: *Reader) !usize {
+    const width = (reader.discardDelimiterInclusive('\n') catch 0) - 1;
+    var counter: @Vector(5, u32) = @splat(0);
+    var slide: usize = 1;
+    while (reader.takeDelimiterExclusive('\n') catch null) |row| : (slide += 1) {
+        if (row.len == 0) break;
+        counter[0] += @intFromBool('#' == row[slide % width]);
+        counter[1] += @intFromBool('#' == row[slide * 3 % width]);
+        counter[2] += @intFromBool('#' == row[slide * 5 % width]);
+        counter[3] += @intFromBool('#' == row[slide * 7 % width]);
+        counter[4] += @intFromBool(slide & 1 == 0 and '#' == row[slide / 2 % width]);
+        _ = try reader.discard(.limited(1));
+        // std.debug.print("{s} || {any}\n", .{ row, counter });
+    }
+    return @reduce(.Mul, counter);
+}
+
 test "part 1" {
     var reader: Reader = .fixed(example);
     const answer = try followSlope(&reader);
@@ -42,5 +63,7 @@ test "part 1" {
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    var reader: Reader = .fixed(example);
+    const answer = try followSlopePattern(&reader);
+    try std.testing.expectEqual(336, answer);
 }
