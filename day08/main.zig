@@ -23,15 +23,23 @@ pub fn main(init: std.process.Init) !void {
     var program: Program = try .load(gpa, &reader.interface);
     defer program.deinit(gpa);
 
-    const answer_p1 = try program.runUntilLoop(gpa);
-    try stdout.print("Part 1: {d}\n", .{answer_p1});
+    const answer_p1 = try program.run(gpa);
+    try stdout.print("Part 1: {d}\n", .{answer_p1.halt});
+
+    const answer_p2 = try program.patch(gpa);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
 const Instruction = union(enum) {
     acc: i16,
     jmp: i16,
-    nop: void,
+    nop: i16,
+};
+
+const Exit = union(enum) {
+    halt: i16,
+    terminate: i16,
 };
 
 const Program = struct {
@@ -54,7 +62,8 @@ const Program = struct {
                 const jmp = try std.fmt.parseInt(i16, args[0 .. args.len - 1], 10);
                 try data.append(gpa, .{ .jmp = jmp });
             } else if (std.mem.eql(u8, "nop", op)) {
-                try data.append(gpa, .{ .nop = {} });
+                const nop = try std.fmt.parseInt(i16, args[0 .. args.len - 1], 10);
+                try data.append(gpa, .{ .nop = nop });
             }
         }
 
@@ -65,22 +74,25 @@ const Program = struct {
         gpa.free(self.data);
     }
 
-    fn runUntilLoop(self: *Program, gpa: Allocator) !i16 {
+    fn run(self: *Program, gpa: Allocator) !Exit {
         var pc: usize, var acc: i16 = .{ 0, 0 };
         var bitset: std.bit_set.DynamicBitSetUnmanaged = try .initEmpty(gpa, self.data.len);
         defer bitset.deinit(gpa);
 
-        while (!bitset.isSet(pc)) {
+        while (pc < self.data.len) {
+            if (bitset.isSet(pc)) {
+                return .{ .halt = acc };
+            }
             const op = self.data[pc];
             bitset.set(pc);
             switch (op) {
                 .acc => |arg| {
-                    std.debug.print("{d:0>2} acc {d}\n", .{ pc, arg });
+                    // std.debug.print("{d:0>2} acc {d}\n", .{ pc, arg });
                     acc += arg;
                     pc += 1;
                 },
                 .jmp => |arg| {
-                    std.debug.print("{d:0>2} jmp {d}\n", .{ pc, arg });
+                    // std.debug.print("{d:0>2} jmp {d}\n", .{ pc, arg });
                     if (arg >= 0) {
                         pc += @intCast(arg);
                     } else {
@@ -88,13 +100,44 @@ const Program = struct {
                     }
                 },
                 .nop => {
-                    std.debug.print("{d:0>2} nop\n", .{pc});
+                    // std.debug.print("{d:0>2} nop\n", .{pc});
                     pc += 1;
                 },
             }
         }
 
-        return acc;
+        return .{ .terminate = acc };
+    }
+
+    fn patch(self: *Program, gpa: Allocator) !i16 {
+        for (self.data, 0..) |inst, i| {
+            switch (inst) {
+                .jmp => |arg| {
+                    self.data[i] = .{ .nop = arg };
+                    switch (try self.run(gpa)) {
+                        .halt => {
+                            self.data[i] = .{ .jmp = arg };
+                        },
+                        .terminate => |acc| {
+                            return acc;
+                        },
+                    }
+                },
+                .nop => |arg| {
+                    self.data[i] = .{ .jmp = arg };
+                    switch (try self.run(gpa)) {
+                        .halt => {
+                            self.data[i] = .{ .nop = arg };
+                        },
+                        .terminate => |acc| {
+                            return acc;
+                        },
+                    }
+                },
+                .acc => {},
+            }
+        }
+        unreachable;
     }
 };
 
@@ -104,9 +147,16 @@ test "part 1" {
     var program: Program = try .load(gpa, &reader);
     defer program.deinit(gpa);
 
-    try std.testing.expectEqual(5, program.runUntilLoop(gpa));
+    const exit = try program.run(gpa);
+    try std.testing.expectEqual(5, exit.halt);
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    const gpa = std.testing.allocator;
+    var reader: Reader = .fixed(example);
+    var program: Program = try .load(gpa, &reader);
+    defer program.deinit(gpa);
+
+    const acc = try program.patch(gpa);
+    try std.testing.expectEqual(8, acc);
 }
