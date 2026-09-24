@@ -1,5 +1,6 @@
 const std = @import("std");
 const example = @embedFile("example.txt");
+const example2 = @embedFile("example2.txt");
 const Allocator = std.mem.Allocator;
 const Reader = std.Io.Reader;
 
@@ -21,8 +22,12 @@ pub fn main(init: std.process.Init) !void {
     var reader = input_file.reader(io, &buf);
     var ruleset: RuleSet = try .initParse(gpa, &reader.interface);
     defer ruleset.deinit(gpa);
+
     const answer_p1 = try ruleset.countContainers(gpa, "shiny gold");
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+
+    const answer_p2 = try ruleset.countItems(gpa, "shiny gold");
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
@@ -31,7 +36,7 @@ const RuleSet = struct {
 
     const RuleMap = std.hash_map.StringHashMapUnmanaged(std.ArrayListUnmanaged(Content));
     const Content = struct {
-        qty: usize,
+        qty: u32,
         colour: []const u8,
     };
 
@@ -64,7 +69,7 @@ const RuleSet = struct {
 
             while (it.next()) |qtytok| {
                 if (std.mem.eql(u8, "no", qtytok)) continue :outer;
-                const qty = try std.fmt.parseInt(usize, qtytok, 10);
+                const qty = try std.fmt.parseInt(u32, qtytok, 10);
 
                 const item_colour = blk: {
                     const variation = it.next() orelse continue :outer;
@@ -117,6 +122,27 @@ const RuleSet = struct {
         return containers.count();
     }
 
+    fn countItems(self: *RuleSet, gpa: Allocator, target: []const u8) !u32 {
+        var dfs: std.ArrayListUnmanaged(Content) = .empty;
+        defer dfs.deinit(gpa);
+
+        if (self.rules.get(target)) |list| {
+            try dfs.appendSlice(gpa, list.items);
+        }
+
+        var total: u32 = 0;
+        while (dfs.pop()) |state| {
+            total += state.qty;
+            if (self.rules.get(state.colour)) |list| {
+                try dfs.ensureUnusedCapacity(gpa, list.items.len);
+                for (list.items) |item| {
+                    dfs.appendAssumeCapacity(.{ .qty = state.qty * item.qty, .colour = item.colour });
+                }
+            }
+        }
+        return total;
+    }
+
     fn deinit(self: *RuleSet, gpa: Allocator) void {
         var it = self.rules.iterator();
         while (it.next()) |entry| {
@@ -137,5 +163,17 @@ test "part 1" {
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    const gpa = std.testing.allocator;
+    var reader: Reader = .fixed(example);
+    var ruleset: RuleSet = try .initParse(gpa, &reader);
+    defer ruleset.deinit(gpa);
+    try std.testing.expectEqual(32, ruleset.countItems(gpa, "shiny gold"));
+}
+
+test "part 2 chain example" {
+    const gpa = std.testing.allocator;
+    var reader: Reader = .fixed(example2);
+    var ruleset: RuleSet = try .initParse(gpa, &reader);
+    defer ruleset.deinit(gpa);
+    try std.testing.expectEqual(126, ruleset.countItems(gpa, "shiny gold"));
 }
