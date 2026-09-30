@@ -20,6 +20,9 @@ pub fn main(init: std.process.Init) !void {
     const answer_p1 = try navigate(&reader.interface);
     try stdout.print("Part 1: {d}\n", .{answer_p1});
 
+    try reader.seekTo(0);
+    const answer_p2 = try navigateCorrected(&reader.interface);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
@@ -47,6 +50,45 @@ fn navigate(reader: *Reader) !u32 {
     return @abs(x) + @abs(y);
 }
 
+fn navigateCorrected(reader: *Reader) !u32 {
+    const Point = struct {
+        x: i32,
+        y: i32,
+    };
+    var ship: Point = .{ .x = 0, .y = 0 };
+    var waypoint: Point = .{ .x = 10, .y = 1 };
+    while (reader.takeDelimiterInclusive('\n')) |instruction| {
+        if (instruction.len <= 1) break;
+        var unit = try std.fmt.parseInt(i32, instruction[1 .. instruction.len - 1], 10);
+        sw: switch (instruction[0]) {
+            'E' => waypoint.x += unit,
+            'S' => waypoint.y -= unit,
+            'W' => waypoint.x -= unit,
+            'N' => waypoint.y += unit,
+            'L' => waypoint = switch (unit) {
+                90 => Point{ .x = -waypoint.y, .y = waypoint.x },
+                180 => Point{ .x = -waypoint.x, .y = -waypoint.y },
+                270 => Point{ .x = waypoint.y, .y = -waypoint.x },
+                else => unreachable,
+            },
+            'R' => {
+                unit = @mod(360 - unit, 360);
+                continue :sw 'L';
+            },
+            'F' => {
+                ship.x += unit * waypoint.x;
+                ship.y += unit * waypoint.y;
+            },
+            else => unreachable,
+        }
+        // std.debug.print("{s} ship: ({d}, {d}) waypoint: ({d}, {d})\n", .{ instruction[0 .. instruction.len - 1], ship.x, ship.y, waypoint.x, waypoint.y });
+    } else |err| switch (err) {
+        error.EndOfStream => {},
+        else => return err,
+    }
+    return @abs(ship.x) + @abs(ship.y);
+}
+
 test "part 1" {
     var reader: Reader = .fixed(example);
     const answer = try navigate(&reader);
@@ -54,5 +96,7 @@ test "part 1" {
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    var reader: Reader = .fixed(example);
+    const answer = try navigateCorrected(&reader);
+    try std.testing.expectEqual(286, answer);
 }
