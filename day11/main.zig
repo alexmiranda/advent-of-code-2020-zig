@@ -20,11 +20,22 @@ pub fn main(init: std.process.Init) !void {
 
     var buf: [4096]u8 = undefined;
     var reader = input_file.reader(io, &buf);
-    var layout: Layout = try .initParse(gpa, &reader.interface);
-    defer layout.deinit(gpa);
 
-    const answer_p1 = try layout.sim(gpa);
+    const answer_p1 = part1_blk: {
+        var layout: Layout = try .initParse(gpa, &reader.interface);
+        defer layout.deinit(gpa);
+        break :part1_blk try layout.part1(gpa);
+    };
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+
+    try reader.seekTo(0);
+    const answer_p2 = part2_blk: {
+        var layout: Layout = try .initParse(gpa, &reader.interface);
+        defer layout.deinit(gpa);
+        break :part2_blk try layout.part2(gpa);
+    };
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
+
     try stdout.flush();
 }
 
@@ -84,7 +95,15 @@ const Layout = struct {
         gpa.free(self.grid);
     }
 
-    fn sim(self: *Layout, gpa: Allocator) !u16 {
+    fn part1(self: *Layout, gpa: Allocator) !u16 {
+        return self.sim(gpa, adjacentIndices, 4);
+    }
+
+    fn part2(self: *Layout, gpa: Allocator) !u16 {
+        return self.sim(gpa, sightIndices, 5);
+    }
+
+    fn sim(self: *Layout, gpa: Allocator, indices_fn: *const fn (*const Layout, u16) [8]u16, threshold: u8) !u16 {
         // next state of the grid
         var next: [:.none]Tile = try gpa.allocSentinel(Tile, self.grid.len, .none);
         defer gpa.free(next);
@@ -103,7 +122,7 @@ const Layout = struct {
                 }
 
                 // count occupied adjacent tiles
-                const indices = adjacentIndices(slide, self.width, self.height);
+                const indices = indices_fn(self, slide);
                 // std.debug.print("{any}\n", .{indices});
                 var count_occupied: u8 = 0;
                 inline for (0..8) |i| {
@@ -118,7 +137,7 @@ const Layout = struct {
                     keep_going = true;
                     total_occupied += 1;
                     break :blk .occupied;
-                } else if (self.grid[slide] == .occupied and count_occupied >= 4) blk: {
+                } else if (self.grid[slide] == .occupied and count_occupied >= threshold) blk: {
                     keep_going = true;
                     break :blk .empty;
                 } else blk: {
@@ -137,17 +156,61 @@ const Layout = struct {
         return total_occupied;
     }
 
-    /// Calculates the coordinates of all adjacents tiles
-    fn adjacentIndices(index: u16, width: u16, height: u16) [8]u16 {
-        const w: i16 = @bitCast(width);
-        const h: i16 = @bitCast(height);
+    /// Calculates the coordinates of all adjacents tiles. An adjacent position
+    /// that leaves the grid yields the sentinel, which reads .none and counts zero.
+    fn adjacentIndices(self: *const Layout, index: u16) [8]u16 {
+        const w: i16 = @bitCast(self.width);
+        const h: i16 = @bitCast(self.height);
         const len: i16 = w * h;
-        const offsets: @Vector(8, i16) = .{ -w - 1, -w, -w + 1, -1, 1, w - 1, w, w + 1 };
+        const offsets = computeOffsets(w);
         const splat: @Vector(8, i16) = @splat(@bitCast(index));
         const pred = selectorMask(@bitCast(index), w, len);
         const sentinels: @Vector(8, i16) = @splat(len);
         const indices = splat + offsets;
         return @bitCast(@select(i16, pred, indices, sentinels));
+    }
+
+    /// Walks all 8 directions in lockstep, one distance step per iteration, and
+    /// returns the first non-floor tile along each ray. A ray that leaves the grid
+    /// yields the sentinel, which reads .none and counts zero.
+    fn sightIndices(self: *const Layout, index: u16) [8]u16 {
+        const len: i16 = @intCast(self.grid.len);
+        const w: i16 = @bitCast(self.width);
+        const offsets = computeOffsets(w);
+        const dc: @Vector(8, i16) = .{ -1, 0, 1, -1, 1, -1, 0, 1 };
+        const first: @Vector(8, i16) = @splat(0);
+        const end: @Vector(8, i16) = @splat(len);
+        const limit_cols: @Vector(8, i16) = @splat(w);
+        const origin: @Vector(8, i16) = @splat(@bitCast(index));
+        const cols: @Vector(8, i16) = @splat(@rem(@as(i16, @bitCast(index)), w));
+        var active: @Vector(8, bool) = @splat(true);
+        var found: @Vector(8, u16) = @splat(@bitCast(len));
+        const limit: i16 = @bitCast(@max(self.width, self.height));
+
+        var dist: i16 = 1;
+        while (dist <= limit) : (dist += 1) {
+            const steps: @Vector(8, i16) = @splat(dist);
+            const cand: @Vector(8, i16) = origin + steps * offsets;
+            const col: @Vector(8, i16) = cols + steps * dc;
+            const live: @Vector(8, bool) = active & (cand >= first) & (cand < end) & (col >= first) & (col < limit_cols);
+            var stop: @Vector(8, bool) = @splat(false);
+            inline for (0..8) |lane| {
+                if (live[lane]) {
+                    const j = cand[lane];
+                    if (self.grid[@intCast(j)] != .floor) {
+                        stop[lane] = true;
+                        found[lane] = @intCast(j);
+                    }
+                }
+            }
+            active = live & ~stop;
+            if (@reduce(.And, ~active)) break;
+        }
+        return found;
+    }
+
+    inline fn computeOffsets(w: i16) @Vector(8, i16) {
+        return .{ -w - 1, -w, -w + 1, -1, 1, w - 1, w, w + 1 };
     }
 
     /// Determines the mask used to pick which of the 8 adjacent tiles are relevant.
@@ -213,10 +276,16 @@ test "part 1" {
     defer layout.deinit(gpa);
 
     // std.debug.print("{f}", .{layout});
-    const answer = try layout.sim(gpa);
+    const answer = try layout.part1(gpa);
     try std.testing.expectEqual(37, answer);
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    const gpa = std.testing.allocator;
+    var reader: Reader = .fixed(example);
+    var layout: Layout = try .initParse(gpa, &reader);
+    defer layout.deinit(gpa);
+
+    const answer = try layout.part2(gpa);
+    try std.testing.expectEqual(26, answer);
 }
