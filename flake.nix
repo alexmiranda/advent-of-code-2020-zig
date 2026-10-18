@@ -32,7 +32,7 @@
               modules = [
                 {
                   # https://devenv.sh/reference/options/
-                  packages = [ pkgs.zig_0_16 pkgs.zls_0_16 ];
+                  packages = [ pkgs.zig_0_17 pkgs.zls_0_16 ];
 
                   enterShell = ''
                     ${pkgs.hello}/bin/hello

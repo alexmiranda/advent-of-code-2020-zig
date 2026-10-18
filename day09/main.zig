@@ -31,8 +31,8 @@ pub fn main(init: std.process.Init) !void {
 
 fn XmasCypher(preamble: u16) type {
     return struct {
-        window: [preamble]u64 = [_]u64{0} ** preamble,
-        prefix_sums: [preamble * preamble]u64 = [_]u64{0} ** (preamble * preamble),
+        window: [preamble]u64 = @splat(0),
+        prefix_sums: [preamble * preamble]u64 = @splat(0),
 
         const lanes = std.simd.suggestVectorLength(u64) orelse 1;
         const Self = @This();

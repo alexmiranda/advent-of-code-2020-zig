@@ -26,7 +26,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn findTwoEntries(reader: *Reader) u32 {
-    var nums: std.bit_set.StaticBitSet(2020) = .initEmpty();
+    var nums: std.bit_set.StaticBitSet(2020) = .empty;
 
     var val: u32 = 0;
     while (reader.takeByte()) |ch| {
@@ -52,7 +52,7 @@ fn findTwoEntries(reader: *Reader) u32 {
 }
 
 fn findThreeEntries(reader: *Reader) u64 {
-    var nums: std.bit_set.StaticBitSet(2020) = .initEmpty();
+    var nums: std.bit_set.StaticBitSet(2020) = .empty;
 
     var val: u64 = 0;
     while (reader.takeByte()) |ch| {
