@@ -8,8 +8,6 @@ const example6 = @embedFile("example6.txt");
 const example7 = @embedFile("example7.txt");
 const Allocator = std.mem.Allocator;
 
-const turns = 2020;
-
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     var stdout_buffer: [1024]u8 = undefined;
@@ -28,18 +26,20 @@ pub fn main(init: std.process.Init) !void {
     var reader = input_file.reader(io, &buf);
     const data = try reader.interface.takeDelimiterExclusive('\n');
 
-    const answer_p1 = try play(gpa, data);
+    const answer_p1 = try play(gpa, data, 2020);
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+    const answer_p2 = try play(gpa, data, 30_000_000);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
-fn play(gpa: Allocator, input: []const u8) !u32 {
-    var memo: std.AutoHashMapUnmanaged(u32, u16) = .empty;
+fn play(gpa: Allocator, input: []const u8, turns: u64) !u64 {
+    var memo: std.AutoHashMapUnmanaged(u64, u64) = .empty;
     defer memo.deinit(gpa);
 
     var it = std.mem.tokenizeAny(u8, input, ",\n");
-    var turn: u16 = 0;
-    var number: u32 = undefined;
+    var turn: u64 = 0;
+    var number: u64 = undefined;
     while (it.next()) |tok| : (turn += 1) {
         // std.debug.print("turn={d} number={s}\n", .{ turn, tok });
         number = try std.fmt.parseInt(u32, tok, 10);
@@ -66,15 +66,22 @@ fn play(gpa: Allocator, input: []const u8) !u32 {
 
 test "part 1" {
     const gpa = std.testing.allocator;
-    try std.testing.expectEqual(436, play(gpa, example1));
-    try std.testing.expectEqual(1, play(gpa, example2));
-    try std.testing.expectEqual(10, play(gpa, example3));
-    try std.testing.expectEqual(27, play(gpa, example4));
-    try std.testing.expectEqual(78, play(gpa, example5));
-    try std.testing.expectEqual(438, play(gpa, example6));
-    try std.testing.expectEqual(1836, play(gpa, example7));
+    try std.testing.expectEqual(436, play(gpa, example1, 2020));
+    try std.testing.expectEqual(1, play(gpa, example2, 2020));
+    try std.testing.expectEqual(10, play(gpa, example3, 2020));
+    try std.testing.expectEqual(27, play(gpa, example4, 2020));
+    try std.testing.expectEqual(78, play(gpa, example5, 2020));
+    try std.testing.expectEqual(438, play(gpa, example6, 2020));
+    try std.testing.expectEqual(1836, play(gpa, example7, 2020));
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    const gpa = std.testing.allocator;
+    try std.testing.expectEqual(175594, play(gpa, example1, 30_000_000));
+    try std.testing.expectEqual(2578, play(gpa, example2, 30_000_000));
+    try std.testing.expectEqual(3544142, play(gpa, example3, 30_000_000));
+    try std.testing.expectEqual(261214, play(gpa, example4, 30_000_000));
+    try std.testing.expectEqual(6895259, play(gpa, example5, 30_000_000));
+    try std.testing.expectEqual(18, play(gpa, example6, 30_000_000));
+    try std.testing.expectEqual(362, play(gpa, example7, 30_000_000));
 }
