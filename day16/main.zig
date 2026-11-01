@@ -1,5 +1,6 @@
 const std = @import("std");
-const example = @embedFile("example.txt");
+const example1 = @embedFile("example1.txt");
+const example2 = @embedFile("example2.txt");
 const Allocator = std.mem.Allocator;
 const Reader = std.Io.Reader;
 
@@ -22,14 +23,18 @@ pub fn main(init: std.process.Init) !void {
     var ticket_translator: TicketTranslator = try .initParse(gpa, &reader.interface);
     defer ticket_translator.deinit(gpa);
 
-    const answer_p1 = ticket_translator.scan();
+    const answer_p1 = try ticket_translator.scan(gpa, &reader.interface);
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+
+    const answer_p2 = try ticket_translator.solve(gpa);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
 const TicketTranslator = struct {
     ranges: []struct { u16, u16 },
-    near_by_tickets: []u16,
+    tickets: std.ArrayList(u16),
+    near_by_tickets: ?[]u16 = null,
 
     fn initParse(gpa: Allocator, reader: *Reader) !TicketTranslator {
         var ranges: std.ArrayList(struct { u16, u16 }) = .empty;
@@ -49,57 +54,187 @@ const TicketTranslator = struct {
             ranges.appendAssumeCapacity(.{ b1, b2 });
         }
 
-        // discard the next 4 lines - your tickets and nearby tickets header
-        for (0..5) |_| _ = try reader.takeDelimiterInclusive('\n');
+        _ = try reader.takeDelimiterInclusive('\n'); // empty line
+        _ = try reader.takeDelimiterInclusive('\n'); // your ticket
 
-        var near_by_tickets: std.ArrayList(u16) = .empty;
-        defer near_by_tickets.deinit(gpa);
+        const field_count = ranges.items.len / 2;
+        var your_ticket: std.ArrayList(u16) = try .initCapacity(gpa, field_count);
+        errdefer your_ticket.deinit(gpa);
 
-        while (reader.takeDelimiterExclusive('\n')) |line| : (reader.toss(1)) {
+        {
+            const line = try reader.takeDelimiterInclusive('\n');
+            var it = std.mem.splitScalar(u8, line[0 .. line.len - 1], ',');
+            while (it.next()) |tok| {
+                const value = try std.fmt.parseUnsigned(u16, tok, 10);
+                your_ticket.appendAssumeCapacity(value);
+            }
+        }
+
+        _ = try reader.takeDelimiterInclusive('\n'); // empty line
+
+        return .{
+            .ranges = try ranges.toOwnedSlice(gpa),
+            .tickets = your_ticket,
+        };
+    }
+
+    fn deinit(self: *TicketTranslator, gpa: Allocator) void {
+        gpa.free(self.ranges);
+        self.tickets.deinit(gpa);
+    }
+
+    fn scan(self: *TicketTranslator, gpa: Allocator, reader: *Reader) !u16 {
+        const field_count = self.ranges.len / 2;
+        var error_rate: u16 = 0;
+        _ = try reader.takeDelimiterInclusive('\n'); // near by tickets
+        outer: while (reader.takeDelimiterExclusive('\n')) |line| : (reader.toss(1)) {
             if (line.len == 0) break;
+            const len = self.tickets.items.len;
+            try self.tickets.ensureUnusedCapacity(gpa, field_count);
             var it = std.mem.splitScalar(u8, line, ',');
-            while (it.next()) |s| {
-                const ticket = try std.fmt.parseUnsigned(u16, s, 10);
-                try near_by_tickets.append(gpa, ticket);
+            var value: u16 = 0;
+            while (it.next()) |tok| {
+                value = try std.fmt.parseUnsigned(u16, tok, 10);
+                for (self.ranges) |range| {
+                    if (value >= range.@"0" and value <= range.@"1") {
+                        self.tickets.appendAssumeCapacity(value);
+                        break;
+                    }
+                } else {
+                    error_rate += value;
+                    self.tickets.shrinkRetainingCapacity(len);
+                    continue :outer;
+                }
             }
         } else |err| switch (err) {
             error.EndOfStream => {},
             else => return err,
         }
 
-        return .{
-            .ranges = try ranges.toOwnedSlice(gpa),
-            .near_by_tickets = try near_by_tickets.toOwnedSlice(gpa),
-        };
-    }
-
-    fn deinit(self: *TicketTranslator, gpa: Allocator) void {
-        gpa.free(self.ranges);
-        gpa.free(self.near_by_tickets);
-    }
-
-    fn scan(self: *TicketTranslator) u16 {
-        var error_rate: u16 = 0;
-        for (self.near_by_tickets) |ticket| {
-            for (self.ranges) |range| {
-                if (ticket >= range.@"0" and ticket <= range.@"1") {
-                    break;
-                }
-            } else error_rate += ticket;
-        }
         return error_rate;
+    }
+
+    fn solve(self: *TicketTranslator, gpa: Allocator) !u64 {
+        const field_count: u16 = @truncate(self.ranges.len / 2);
+        var matrix: std.bit_set.Dynamic = try .initEmpty(gpa, field_count * field_count);
+        defer matrix.deinit(gpa);
+
+        var solution = try gpa.alloc(u8, field_count);
+        defer gpa.free(solution);
+        @memset(solution, std.math.maxInt(u8));
+
+        var stack: std.ArrayList(u8) = .empty;
+        defer stack.deinit(gpa);
+
+        var it = std.mem.window(struct { u16, u16 }, self.ranges, 2, 2);
+        for (0..field_count) |col| {
+            it.reset();
+            var count_matches: u8 = 0;
+            var last_match_index: u8 = std.math.maxInt(u8);
+            var field_index: u8 = 0;
+            while (it.next()) |field| : (field_index += 1) {
+                // already found a solution for this field
+                if (solution[field_index] != std.math.maxInt(u8)) {
+                    continue;
+                }
+
+                // determine which fields are matched
+                var slide = col;
+                const valid = while (slide < self.tickets.items.len) : (slide += field_count) {
+                    const value = self.tickets.items[slide];
+                    const a, const b = .{ field[0], field[1] };
+                    if ((value < a.@"0" or value > a.@"1") and (value < b.@"0" or value > b.@"1")) {
+                        // don't need to continue checking more values at this point
+                        break false;
+                    }
+                } else blk: {
+                    count_matches += 1;
+                    last_match_index = field_index;
+                    break :blk true;
+                };
+                // if all values in the column matched, we set its bit
+                if (valid) matrix.set(col * field_count + field_index);
+            }
+
+            // if the column matches only a single field, then we lock it in
+            if (count_matches == 1) {
+                try stack.append(gpa, @truncate(col));
+                solution[last_match_index] = @truncate(col);
+                // std.debug.print("{d} col is locked in!\n", .{col});
+            }
+        }
+
+        // in my input, the first 6 fields start with "departure". YMMV
+        const last_relevant_index = @min(6, solution.len);
+        while (stack.pop()) |col| {
+            // stop early if the relevant columns are locked in
+            if (!std.mem.containsAtLeastScalar(u8, solution[0..last_relevant_index], std.math.maxInt(u8), 1)) break;
+
+            // read each column and if it's locked in, clear all other matches for the same field
+            const bits = foldColBits(&matrix, col, field_count);
+            // std.debug.print("col={d:0>2} bits={b:0>20}\n", .{ col, bits });
+            if (@popCount(bits) != 1) continue;
+            const field_index = @ctz(bits);
+            solution[field_index] = col;
+            for (0..field_count) |index| {
+                const i: u8 = @truncate(index);
+                if (i == col) continue;
+                matrix.unset(i * field_count + field_index);
+                if (std.mem.findScalar(u8, solution, i) == null) {
+                    try stack.append(gpa, i);
+                }
+            }
+        }
+
+        // printMatrix(&matrix, field_count);
+        // std.debug.print("solution: {any}\n", .{solution});
+        // std.debug.print("your ticket: {any}\n", .{self.tickets.items[0..field_count]});
+
+        // multiply the relevant values from 'your ticket'
+        var result: u64 = self.tickets.items[solution[0]];
+        for (solution[1..@min(6, solution.len)]) |col| {
+            // std.debug.print("result = {d} * {d} (col={d})\n", .{ result, self.tickets.items[col], col });
+            result *= self.tickets.items[col];
+        }
+        return result;
+    }
+
+    fn foldColBits(matrix: *std.bit_set.Dynamic, col: u8, field_count: u16) u32 {
+        var bits: u32 = 0;
+        const start = col * field_count;
+        const end = start + field_count;
+        for (start..end) |slice| {
+            if (matrix.isSet(slice)) {
+                const pos: u5 = @truncate(slice - start);
+                bits |= @as(u32, 1) << pos;
+            }
+        }
+        return bits;
+    }
+
+    fn printMatrix(matrix: *std.bit_set.Dynamic, field_count: u16) void {
+        for (0..matrix.bit_length) |i| {
+            if (matrix.isSet(i)) std.debug.print("1", .{}) else std.debug.print("0", .{});
+            if (i % field_count == field_count - 1) std.debug.print("\n", .{});
+        }
     }
 };
 
 test "part 1" {
     const gpa = std.testing.allocator;
-    var reader: Reader = .fixed(example);
+    var reader: Reader = .fixed(example1);
     var ticket_translator: TicketTranslator = try .initParse(gpa, &reader);
     defer ticket_translator.deinit(gpa);
 
-    try std.testing.expectEqual(71, ticket_translator.scan());
+    try std.testing.expectEqual(71, ticket_translator.scan(gpa, &reader));
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    const gpa = std.testing.allocator;
+    var reader: Reader = .fixed(example2);
+    var ticket_translator: TicketTranslator = try .initParse(gpa, &reader);
+    defer ticket_translator.deinit(gpa);
+
+    _ = try ticket_translator.scan(gpa, &reader);
+    try std.testing.expectEqual(11 * 12 * 13, ticket_translator.solve(gpa));
 }
