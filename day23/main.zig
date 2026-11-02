@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -20,6 +21,11 @@ pub fn main(init: std.process.Init) !void {
     var crab_game: CrabGame = .init(slice);
     const answer_p1 = crab_game.play(100);
     try stdout.print("Part 1: {d}\n", .{answer_p1});
+
+    const gpa = init.gpa;
+    crab_game = .init(slice);
+    const answer_p2 = try crab_game.playForReal(gpa, 10_000_000);
+    try stdout.print("Part 2: {d}\n", .{answer_p2});
     try stdout.flush();
 }
 
@@ -75,6 +81,54 @@ const CrabGame = struct {
         return result;
     }
 
+    fn playForReal(self: *CrabGame, gpa: Allocator, n: u64) !u64 {
+        var circle: std.AutoHashMapUnmanaged(u32, u32) = .empty;
+        defer circle.deinit(gpa);
+
+        const first: u8 = self.current + 1;
+        var prev: u32 = 0;
+        for (self.cups, 1..) |next, slide| {
+            try circle.put(gpa, @intCast(slide), next);
+            if (next == first) prev = @intCast(slide);
+        }
+
+        try circle.put(gpa, prev, self.cups.len + 1);
+        try circle.put(gpa, 1_000_000, first);
+
+        var current: u32 = self.current + 1;
+        for (0..n) |_| {
+            // pick up the next 3 cups clockwise
+            var pick_up: [3]u32 = undefined;
+            var next = nextOf(&circle, current);
+            for (0..3) |slide| {
+                pick_up[slide] = next;
+                next = nextOf(&circle, next);
+            }
+
+            // decide the destination
+            var dest = if (current == 1) 1_000_000 else current - 1;
+            while (std.mem.findScalar(u32, &pick_up, dest)) |_| {
+                dest -= 1;
+                if (dest == 0) dest = 1_000_000;
+            }
+
+            // move cups
+            try circle.put(gpa, current, next);
+            current = next;
+            next = nextOf(&circle, dest);
+            try circle.put(gpa, dest, pick_up[0]);
+            try circle.put(gpa, pick_up[2], next);
+        }
+
+        const a: u32 = nextOf(&circle, 1);
+        const b: u64 = nextOf(&circle, a);
+        return a * b;
+    }
+
+    fn nextOf(circle: *std.AutoHashMapUnmanaged(u32, u32), cup: u32) u32 {
+        return circle.get(cup) orelse (if (cup == 1_000_000) 1 else cup + 1);
+    }
+
     pub fn format(self: CrabGame, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         var buf: [9]u8 = undefined;
         buf[0] = '0' + self.current + 1;
@@ -94,5 +148,7 @@ test "part 1" {
 }
 
 test "part 2" {
-    return error.SkipZigTest;
+    const gpa = std.testing.allocator;
+    var crab_game: CrabGame = .init("389125467");
+    try std.testing.expectEqual(149245887792, crab_game.playForReal(gpa, 10_000_000));
 }
