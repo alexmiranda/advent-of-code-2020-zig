@@ -13,12 +13,84 @@ pub fn main(init: std.process.Init) !void {
     };
     defer input_file.close(io);
 
-    try stdout.print("All your {s} are belong to us.\n", .{"codebase"});
+    var buf: [9]u8 = undefined;
+    var reader = input_file.reader(io, &buf);
+    const slice = reader.interface.take(9) catch undefined;
+
+    var crab_game: CrabGame = .init(slice);
+    const answer_p1 = crab_game.play(100);
+    try stdout.print("Part 1: {d}\n", .{answer_p1});
     try stdout.flush();
 }
 
+const CrabGame = struct {
+    cups: [9]u8,
+    current: u8,
+
+    fn init(slice: []const u8) CrabGame {
+        var self: CrabGame = undefined;
+        var it = std.mem.window(u8, slice, 2, 1);
+        while (it.next()) |pair| {
+            const current, const next = .{ pair[0] - '0', pair[1] - '0' };
+            self.cups[current - 1] = next;
+        }
+        const current, const next = .{ slice[slice.len - 1] - '0', slice[0] - '0' };
+        self.cups[current - 1] = next;
+        self.current = next - 1;
+        return self;
+    }
+
+    fn play(self: *CrabGame, n: u8) u64 {
+        for (0..n) |_| {
+            // pick up the next 3 cups clockwise
+            var pick_up: [3]u8 = undefined;
+            var next = self.cups[self.current];
+            for (0..3) |slide| {
+                pick_up[slide] = next;
+                next = self.cups[next - 1];
+            }
+
+            // decide the destination
+            var dest = if (self.current == 0) 9 else self.current;
+            while (std.mem.findScalar(u8, &pick_up, dest)) |_| {
+                dest -= 1;
+                if (dest == 0) dest = 9;
+            }
+
+            // move cups
+            self.cups[self.current] = next;
+            self.current = next - 1;
+            next = self.cups[dest - 1];
+            self.cups[dest - 1] = pick_up[0];
+            self.cups[pick_up[2] - 1] = next;
+        }
+
+        var result: u64 = 0;
+        var value = self.cups[0];
+        for (0..8) |_| {
+            result *= 10;
+            result += value;
+            value = self.cups[value - 1];
+        }
+        return result;
+    }
+
+    pub fn format(self: CrabGame, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        var buf: [9]u8 = undefined;
+        buf[0] = '0' + self.current + 1;
+        var next = self.cups[self.current];
+        for (1..9) |slide| {
+            buf[slide] = '0' + next;
+            next = self.cups[next - 1];
+        }
+        try writer.writeAll(&buf);
+    }
+};
+
 test "part 1" {
-    return error.SkipZigTest;
+    var crab_game: CrabGame = .init("389125467");
+    try std.testing.expectEqual(92658374, crab_game.play(10));
+    try std.testing.expectEqual(67384529, crab_game.play(90));
 }
 
 test "part 2" {
